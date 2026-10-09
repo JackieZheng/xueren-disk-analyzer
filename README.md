@@ -4,7 +4,7 @@
 
 > 图示：虚拟数据截图，展示「总容量 512 GB / 已用 328.4 GB / 剩余 183.6 GB / 使用率 64.1%」四项概览卡片、Treemap + Top N 条形图 + 环形占比图三张可视化、以及可排序的目录/文件明细表（含 🛡️系统、👁️隐藏 属性标签与 🔥快增 变化标记）。
 
-![界面预览 · 虚拟数据](assets/screenshot.png)
+![界面预览 · 虚拟数据](https://raw.githubusercontent.com/JackieZheng/xueren-disk-analyzer/main/assets/screenshot.png)
 
 ## 两种用法
 

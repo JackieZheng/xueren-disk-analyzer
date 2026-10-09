@@ -8,7 +8,7 @@ displayName: 雪人老师·磁盘空间分析器
 summary: 交互式磁盘空间分析（可选 C/D/E/F 或目录），图表展示占用，网页版带实时进度/可停止/点击打开目录。
 description_zh: 给定磁盘（C/D/E/F 任选、多选或全盘）或任意目录，交互式分析空间占用并以图表展示。命令行静态报告 + 网页交互版（深色「任务实时进度面板」风），纯 Python，零 CDN 离线自包含。
 description_en: Interactive disk space analyzer (choose C/D/E/F or a folder), visualize usage with charts; web UI with live progress card, stoppable scan, click-to-open folder.
-version: 1.0.1
+version: 1.0.2
 author: 雪人
 license: MIT
 allowed-tools: ""
@@ -101,6 +101,8 @@ metadata:
 无（扫描不落日志）
 
 ## 更新记录
+
+- **v1.0.2**（2026-10-09）—— 修 SkillHub 图裂：README 中的截图引用由本地相对路径 `assets/screenshot.png` 改为 GitHub raw 外链 `https://raw.githubusercontent.com/JackieZheng/xueren-disk-analyzer/main/assets/screenshot.png`（SkillHub 拒收 png 附件，需走外链）。功能无变更。
 
 - **v1.0.1**（2026-10-09）—— 详情页 4 项 UX/口径修正：
   1. 占比口径：**「占磁盘%」→「占目标%」**（`title` 悬浮说明"占当前扫描目标 = 所选盘符 / 文件夹"），避免用户扫描单个文件夹时误以为分母是整盘容量；表格、树形、图例、说明块四处文案同步。

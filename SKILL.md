@@ -2,13 +2,13 @@
 id: xueren-disk-analyzer
 name: 雪人老师·磁盘空间分析器
 title: 雪人老师·磁盘空间分析器
-description: 给定磁盘（C/D/E/F 任选、多选或全盘）或任意目录，交互式分析空间占用并以图表展示。命令行静态报告 + 网页交互版（深色「任务实时进度面板」风：盘符下拉、目录选择、实时扫描进度卡片、可停止、点击目录打开所在位置、路径太长中间省略号单行显示）。纯 Python，依赖 matplotlib + squarify（已装），零 CDN、离线自包含。当用户说"分析 C 盘""磁盘空间分析""哪个目录占空间""E 盘空间分析""做个磁盘分析工具"等意图时触发。
+description: 给定磁盘（C/D/E/F 任选、多选或全盘）或任意目录，交互式分析空间占用并以图表展示。命令行静态报告 + 网页交互版（深色「任务实时进度面板」风：盘符下拉、目录选择、实时扫描进度卡片、可停止、点击目录打开所在位置、路径太长中间省略号单行显示；明细表「占目标%」占比口径准确、🛡️系统/👁️隐藏双属性标签可共存且隐藏项名灰色显示、文件行操作图标保留但灰置、盘符下拉自绘弹层与整体风格统一）。纯 Python，依赖 matplotlib + squarify（已装），零 CDN、离线自包含。当用户说"分析 C 盘""磁盘空间分析""哪个目录占空间""E 盘空间分析""做个磁盘分析工具"等意图时触发。
 slug: xueren-disk-analyzer
 displayName: 雪人老师·磁盘空间分析器
 summary: 交互式磁盘空间分析（可选 C/D/E/F 或目录），图表展示占用，网页版带实时进度/可停止/点击打开目录。
 description_zh: 给定磁盘（C/D/E/F 任选、多选或全盘）或任意目录，交互式分析空间占用并以图表展示。命令行静态报告 + 网页交互版（深色「任务实时进度面板」风），纯 Python，零 CDN 离线自包含。
 description_en: Interactive disk space analyzer (choose C/D/E/F or a folder), visualize usage with charts; web UI with live progress card, stoppable scan, click-to-open folder.
-version: 1.0.0
+version: 1.0.1
 author: 雪人
 license: MIT
 allowed-tools: ""
@@ -18,6 +18,7 @@ trigger: ["分析 C 盘", "磁盘空间分析", "哪个目录占空间", "E 盘�
 examples: "用户：做个磁盘分析工具，能选盘符出图表 → 跑 scripts/disk_analyzer.py --disk E 出静态 HTML 报告，或 scripts/disk_analyzer_web.py 起本地服务在浏览器交互分析（盘符下拉 + 实时进度 + 可停止 + 点击打开目录）。"
 platforms: [ima, WorkBuddy, QClaw]
 github: https://github.com/JackieZheng/xueren-disk-analyzer
+skillhub: https://skillhub.cn/skills/indiv-xueren/xueren-disk-analyzer
 metadata:
   author: 雪人
   category: 工具
@@ -99,6 +100,16 @@ metadata:
 ### log/
 无（扫描不落日志）
 
+## 更新记录
+
+- **v1.0.1**（2026-10-09）—— 详情页 4 项 UX/口径修正：
+  1. 占比口径：**「占磁盘%」→「占目标%」**（`title` 悬浮说明"占当前扫描目标 = 所选盘符 / 文件夹"），避免用户扫描单个文件夹时误以为分母是整盘容量；表格、树形、图例、说明块四处文案同步。
+  2. 文件行操作列：🔍 扫描图标**不再隐藏，改为禁用态**（`opacity:.28`、`cursor:not-allowed`、`title="文件无法展开子项"`），保持所有行按钮位置一致、列表纵向对齐不再抖动。
+  3. 属性标签双独立：内核新增 `is_hidden_attr()` 用 `GetFileAttributesW` 读 `FILE_ATTRIBUTE_HIDDEN`，与原有 `is_protected()`（🛡️系统白名单 + `FILE_ATTRIBUTE_SYSTEM`）**不再互斥**——同一条目可同时挂 🛡️ + 👁️；`pagefile.sys` / `$Recycle.Bin` 等 Windows 隐藏条目自动打 👁️ 标签，隐藏条目名加 `.nmname.dim` 灰色显示，方便一眼识别。
+  4. 盘符下拉：原 `<select>` 原生弹层无法与页面深色主题协调，改为**自绘下拉层**（`.dd/.ddbtn/.ddlist/.dditem` + `mountDD(selId, opts, onChange)`），原生 `<select>` 保留为隐藏值源以维持兼容性；盘符与根目录选择器共用同一渲染逻辑，视觉统一。
+
+- **v1.0.0**（2026-10-09）—— 首版发布：CLI + Web 双形态；Web 版含盘符下拉、目录选择、SSE 实时进度卡片、可停止扫描、点击目录打开资源管理器、断连自愈提示、路径中间省略号单行显示、长路径 hover 完整路径。
+
 ## 资源固化与自包含（强制）
 
 1. **判断口径**：没有 `disk_analyzer.py` / `disk_analyzer_web.py` 就产不出报告 → 强相关，必须固化进 `scripts/`。
@@ -119,4 +130,6 @@ metadata:
 - **路径中间省略号**：长路径（进度卡片、明细表、toast）用 JS `midEllipsis` 保留首尾、中间 `…`，CSS 原生只支持尾部省略号故用 JS 截断；明细表单元格 `title` 保留完整路径供悬停。
 - **安全**：`/open` 仅允许打开本机已存在的固定盘路径，防止越权打开网络共享/系统目录。
 - **squarify 坑**：treemap 面积必须先用 `normalize_sizes(sizes, dx, dy)` 归一化到总面积，否则大体积磁盘会让矩形宽达 1e11 像素致渲染崩溃（已在代码内修好，勿改回传原始字节）。
+- **属性标签口径**：🛡️系统 = 系统白名单（`pagefile.sys`/`$Recycle.Bin`/`Windows.old` 等）或 `FILE_ATTRIBUTE_SYSTEM`；👁️隐藏 = `FILE_ATTRIBUTE_HIDDEN`。文件行两者独立、可共存；目录行仍按"系统优先"只挂一个标签以保持视觉简洁。隐藏条目名统一 `.nmname.dim` 灰色显示。
+- **占目标%**：占比分母永远是**用户当前扫描的目标**（盘符或文件夹），不是整盘容量。文案不得写"占磁盘%"。
 - **版本**：每次修改 SKILL.md，`version` +1 并重新备份。

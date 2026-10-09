@@ -50,6 +50,17 @@ def human(n):
     return f"{n:.1f} PB"
 
 
+def fmt_mtime(ts):
+    """时间戳 -> 年-月-日 时:分；None/0 返回 '—'。"""
+    if not ts:
+        return "—"
+    try:
+        import datetime
+        return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return "—"
+
+
 def setup_cjk_font():
     """在 Windows 上注册中文字体，避免图表中文变方块。"""
     font_dir = r"C:\Windows\Fonts"
@@ -114,17 +125,104 @@ def list_fixed_drives():
         return []
 
 
+def is_hidden_or_system(path):
+    """判断文件/目录是否带 Windows 隐藏或系统属性；非 Windows 用点开头文件名判断。
+    仅用于统计“本次扫描是否包含隐藏/系统文件”（全局统一提示），不用于逐条打标——
+    因为几乎每个目录下都存在隐藏文件（如 .git/.vscode/AppData），逐条标注会全是噪音。"""
+    try:
+        if os.name == "nt":
+            attrs = ctypes.windll.kernel32.GetFileAttributesW(ctypes.c_wchar_p(path))
+            INVALID = 0xFFFFFFFF
+            if attrs != INVALID:
+                FILE_ATTRIBUTE_HIDDEN = 0x2
+                FILE_ATTRIBUTE_SYSTEM = 0x4
+                if attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM):
+                    return True
+        else:
+            base = os.path.basename(path)
+            if base.startswith("."):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+# Windows 系统保留目录/文件白名单（小写比对）——这些条目删除或移动会导致系统损坏。
+PROTECTED_NAMES = {
+    # 系统目录
+    "windows", "program files", "program files (x86)", "programdata",
+    "$recycle.bin", "recycler", "system volume information", "recovery",
+    "$windows.~bt", "$windows.~ws", "windows.old", "$sysreset",
+    "documents and settings", "perflogs", "msocache", "system.sav",
+    "winsxs", "boot", "efi", "sources",
+    # 系统文件
+    "pagefile.sys", "hiberfil.sys", "swapfile.sys", "bootmgr",
+    "bootsect.bak", "ntldr", "ntdetect.com", "config.sys",
+    "io.sys", "msdos.sys", "autoexec.bat",
+}
+
+
+def is_hidden_attr(path):
+    """判断条目自身是否带「隐藏」属性（Windows FILE_ATTRIBUTE_HIDDEN；非 Windows 看点开头）。
+    注意：这是条目自身的属性，与「目录里是否含有隐藏文件」是两回事。"""
+    try:
+        if os.name == "nt":
+            attrs = ctypes.windll.kernel32.GetFileAttributesW(ctypes.c_wchar_p(path))
+            INVALID = 0xFFFFFFFF
+            FILE_ATTRIBUTE_HIDDEN = 0x2
+            if attrs != INVALID and (attrs & FILE_ATTRIBUTE_HIDDEN):
+                return True
+        else:
+            if os.path.basename(path).startswith("."):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def is_protected(name, path=None):
+    """判定是否为「系统保留项」——只有这类条目才逐条打「🛡️系统」标识，防止误删。
+    判定依据二选一：
+      1) 名称命中 Windows 系统保留名单（大小写不敏感）；
+      2) 带 FILE_ATTRIBUTE_SYSTEM 系统属性（如 $Recycle.Bin、System Volume Information）。
+    注意：单纯的「隐藏」属性不算（.git/.vscode/AppData 等都是隐藏，但是用户数据）。"""
+    try:
+        if str(name).lower() in PROTECTED_NAMES:
+            return True
+    except Exception:
+        pass
+    if path and os.name == "nt":
+        try:
+            attrs = ctypes.windll.kernel32.GetFileAttributesW(ctypes.c_wchar_p(path))
+            INVALID = 0xFFFFFFFF
+            FILE_ATTRIBUTE_SYSTEM = 0x4
+            if attrs != INVALID and (attrs & FILE_ATTRIBUTE_SYSTEM):
+                return True
+        except Exception:
+            pass
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 扫描（多进程并行累加各顶层目录体积）
 # ---------------------------------------------------------------------------
 
 def scan_top(top, progress=None):
     """
-    累加单个目录的总体积，并按下一级（immediate children）分组。
-    返回 (total, children_dict, files_size)
+    累加单个目录的总体积，并按下一级（immediate children）分组；
+    同时完整枚举「直接位于该目录下的文件」，供明细表逐条列出。
+    返回 8 元组：
+      (total, children_dict, children_flags, files_size,
+       children_mtime, files_mtime, files_has_hidden, files_list)
       - total: 该目录子树总字节
       - children_dict: {下级子目录名: 子树字节}
+      - children_flags: {下级子目录名: {protected:bool, hidden:bool}} 条目自身属性
+          protected = 系统保留项（见 is_protected），hidden = 带隐藏属性（见 is_hidden_attr）
       - files_size: 直接位于该目录下的文件总字节
+      - children_mtime: {下级子目录名: 最后修改时间戳}
+      - files_mtime: 直接位于该目录下文件的最大最后修改时间戳
+      - files_has_hidden: 该层直接文件里是否存在隐藏/系统文件（仅用于全局提示）
+      - files_list: [ {name,size,mtime,path,is_protected,hidden} ] 该目录下的每一个文件
     用 os.scandir + 缓存 entry.stat() 提升效率；跳过符号链接与无权限目录。
     progress: 可选共享字典（线程安全），用于实时上报：
       progress['current'] = 当前正在遍历的目录路径
@@ -132,7 +230,12 @@ def scan_top(top, progress=None):
     """
     total = 0
     children = {}
+    children_flags = {}
+    children_mtime = {}
+    files_list = []
     files_size = 0
+    files_mtime = None
+    files_has_hidden = False
     stack = [top]
     while stack:
         if progress and progress.get("cancel"):
@@ -148,11 +251,29 @@ def scan_top(top, progress=None):
                     try:
                         if entry.is_dir(follow_symlinks=False):
                             stack.append(entry.path)
+                            if cur == top:
+                                children_mtime[entry.name] = \
+                                    entry.stat(follow_symlinks=False).st_mtime
+                                children_flags[entry.name] = {
+                                    "protected": is_protected(entry.name, entry.path),
+                                    "hidden": is_hidden_attr(entry.path),
+                                }
                         else:
-                            sz = entry.stat(follow_symlinks=False).st_size
+                            st = entry.stat(follow_symlinks=False)
+                            sz = st.st_size
                             total += sz
                             if cur == top:
                                 files_size += sz
+                                files_list.append({
+                                    "name": entry.name, "size": sz,
+                                    "mtime": st.st_mtime, "path": entry.path,
+                                    "is_protected": is_protected(entry.name, entry.path),
+                                    "hidden": is_hidden_attr(entry.path),
+                                })
+                                if is_hidden_or_system(entry.path):
+                                    files_has_hidden = True
+                                if files_mtime is None or st.st_mtime > files_mtime:
+                                    files_mtime = st.st_mtime
                             else:
                                 key = os.path.relpath(cur, top).split(os.sep)[0]
                                 children[key] = children.get(key, 0) + sz
@@ -160,7 +281,8 @@ def scan_top(top, progress=None):
                         continue
         except (PermissionError, OSError):
             continue
-    return total, children, files_size
+    return (total, children, children_flags, files_size,
+            children_mtime, files_mtime, files_has_hidden, files_list)
 
 
 def analyze_disk(drive, depth=2, top=15, workers=0, progress=None):
@@ -182,15 +304,37 @@ def analyze_disk(drive, depth=2, top=15, workers=0, progress=None):
 
     # 列出顶层条目
     top_dirs = []
+    top_dir_mtime = {}
+    top_dir_flags = {}
     root_files_size = 0
+    root_files_mtime = None
+    root_files_hidden = False
+    root_files_list = []   # 盘根目录下的每一个文件（逐条列出，不再聚合成一项）
     try:
         with os.scandir(root) as it:
             for entry in it:
                 try:
                     if entry.is_dir(follow_symlinks=False):
                         top_dirs.append(entry.name)
+                        top_dir_mtime[entry.name] = \
+                            entry.stat(follow_symlinks=False).st_mtime
+                        top_dir_flags[entry.name] = {
+                            "protected": is_protected(entry.name, entry.path),
+                            "hidden": is_hidden_attr(entry.path),
+                        }
                     else:
-                        root_files_size += entry.stat(follow_symlinks=False).st_size
+                        st = entry.stat(follow_symlinks=False)
+                        root_files_size += st.st_size
+                        root_files_list.append({
+                            "name": entry.name, "size": st.st_size,
+                            "mtime": st.st_mtime, "path": entry.path,
+                            "is_protected": is_protected(entry.name, entry.path),
+                            "hidden": is_hidden_attr(entry.path),
+                        })
+                        if is_hidden_or_system(entry.path):
+                            root_files_hidden = True
+                        if root_files_mtime is None or st.st_mtime > root_files_mtime:
+                            root_files_mtime = st.st_mtime
                 except OSError:
                     continue
     except (PermissionError, OSError) as e:
@@ -203,6 +347,7 @@ def analyze_disk(drive, depth=2, top=15, workers=0, progress=None):
 
     print(f"  [+] {drive} 顶层目录 {len(top_dirs)} 个，开始并行扫描…")
     nodes = []
+    any_hidden = bool(root_files_hidden)
     if workers <= 0:
         workers = min(max(len(top_dirs), 1), (os.cpu_count() or 4) * 2)
     # 目录遍历是 IO 密集（stat 释放 GIL），用线程池即可并行且便于共享进度/取消
@@ -215,39 +360,46 @@ def analyze_disk(drive, depth=2, top=15, workers=0, progress=None):
             if progress is not None:
                 progress["phase"] = f"正在处理 {d}（已完成 {done}/{len(futs)}）"
             try:
-                dtotal, dchildren, dfiles = fut.result()
+                (dtotal, dchildren, dchildren_flags, dfiles,
+                 _, _, dfiles_hidden, _) = fut.result()
             except Exception as e:
                 print(f"  [!] 扫描 {d} 失败: {e}", file=sys.stderr)
-                dtotal, dchildren, dfiles = 0, {}, 0
+                dtotal, dchildren, dchildren_flags, dfiles, dfiles_hidden = 0, {}, {}, 0, False
+            if dfiles_hidden:
+                any_hidden = True
             done += 1
             if progress is not None:
                 progress["done"] = done
             children_nodes = []
             if depth >= 2:
                 for sub, sz in dchildren.items():
+                    _f = dchildren_flags.get(sub) or {}
                     children_nodes.append({
                         "name": sub, "label": sub, "size": sz,
                         "children": [], "is_file": False,
                         "path": os.path.join(root, d, sub),
-                    })
-                if dfiles > 0:
-                    children_nodes.append({
-                        "name": "（该层文件）", "label": "（该层文件）",
-                        "size": dfiles, "children": [], "is_file": True,
-                        "path": None,
+                        "mtime": None,
+                        "is_protected": _f.get("protected", False),
+                        "hidden": _f.get("hidden", False),
                     })
                 children_nodes.sort(key=lambda x: x["size"], reverse=True)
             nodes.append({
                 "name": d, "label": d, "size": dtotal,
                 "children": children_nodes, "is_file": False,
                 "path": os.path.join(root, d),
+                "mtime": top_dir_mtime.get(d),
+                "is_protected": (top_dir_flags.get(d) or {}).get("protected", False),
+                "hidden": (top_dir_flags.get(d) or {}).get("hidden", False),
             })
 
-    if root_files_size > 0:
+    # 盘根目录下的文件逐条列出（不再聚合成「（根目录文件）」一项）
+    for f in root_files_list:
         nodes.append({
-            "name": "（根目录文件）", "label": "（根目录文件）",
-            "size": root_files_size, "children": [], "is_file": True,
-            "path": None,
+            "name": f["name"], "label": f["name"], "size": f["size"],
+            "children": [], "is_file": True,
+            "path": f["path"], "mtime": f["mtime"],
+            "is_protected": f["is_protected"],
+            "hidden": f.get("hidden", False),
         })
 
     nodes.sort(key=lambda x: x["size"], reverse=True)
@@ -262,6 +414,7 @@ def analyze_disk(drive, depth=2, top=15, workers=0, progress=None):
         "scanned_bytes": scanned,
         "nodes": nodes,
         "top": top,
+        "has_hidden_any": any_hidden,
     }
 
 
@@ -278,6 +431,13 @@ ACCENT = "#ef6c00"   # 金橙强调色（最大项）
 OTHER = "#bdbdbd"    # “其他”灰
 
 
+def color_for_index(i):
+    """统一配色：三张图的同一目录按全局排名取同一颜色（最大=金橙，其余=绿色梯度）。"""
+    if i == 0:
+        return ACCENT
+    return PALETTE[(i - 1) % len(PALETTE)]
+
+
 def _lighten(hexc, amt=0.3):
     """把颜色按比例向白色混合，amt∈[0,1]。"""
     hexc = hexc.lstrip("#")
@@ -290,17 +450,17 @@ def _lighten(hexc, amt=0.3):
 
 def _fmt_png(fig):
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight",
-                facecolor="white")
+    # 不使用 bbox_inches="tight"：保证三张图都是固定的 12×8×dpi 尺寸，视觉上等大
+    fig.savefig(buf, format="png", dpi=140, facecolor="white")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def make_treemap(data, max_depth):
     """嵌套矩形树图（treemap）。depth=1 只画顶层；depth=2 顶层+下级。"""
-    fig, ax = plt.subplots(figsize=(13, 8))
+    fig, ax = plt.subplots(figsize=(12, 8))
     ax.set_axis_off()
-    W, H = 13, 8
+    W, H = 12, 8
     total_area = W * H
 
     # 顶层节点（cap 到 30 个，其余并入“其他”）
@@ -309,7 +469,7 @@ def make_treemap(data, max_depth):
         kept = nodes[:30]
         other_sz = sum(n["size"] for n in nodes[30:])
         nodes = kept + [{"name": "(其他)", "label": "(其他)", "size": other_sz,
-                        "children": [], "is_file": True}]
+                        "children": [], "is_file": True, "_synthetic": True}]
 
     vals = [max(n["size"], 1) for n in nodes]
     vals = squarify.normalize_sizes(vals, W, H)
@@ -346,9 +506,10 @@ def make_treemap(data, max_depth):
                 depth + 1, child_color)
 
     for rect, node, i in zip(rects, nodes, range(len(nodes))):
-        base = PALETTE[i % len(PALETTE)]
-        if i == 0:
-            base = ACCENT  # 最大项用金橙强调
+        if node.get("_synthetic"):
+            base = OTHER  # “其他”聚合用灰色
+        else:
+            base = color_for_index(i)
         rec(node, rect["x"], rect["y"], rect["dx"], rect["dy"], 0, base)
 
     ax.set_xlim(0, W)
@@ -361,11 +522,13 @@ def make_treemap(data, max_depth):
 
 def make_bar(data):
     """横向条形图：Top N 目录。"""
-    nodes = data["nodes"][:data["top"]]
-    labels = [n["label"] for n in nodes][::-1]
-    sizes = [n["size"] / 1024 ** 3 for n in nodes][::-1]  # GB
-    fig, ax = plt.subplots(figsize=(10, max(4, 0.42 * len(labels) + 1.5)))
-    colors = [ACCENT] + [PALETTE[i % len(PALETTE)] for i in range(len(sizes) - 1)]
+    nodes_top = data["nodes"][:data["top"]]
+    rev = nodes_top[::-1]
+    labels = [n["label"] for n in rev]
+    sizes = [n["size"] / 1024 ** 3 for n in rev]  # GB
+    fig, ax = plt.subplots(figsize=(12, 8))
+    colors = [OTHER if n.get("_synthetic") else color_for_index(i)
+              for i, n in enumerate(nodes_top)][::-1]
     bars = ax.barh(labels, sizes, color=colors, edgecolor="white")
     ax.set_xlabel("体积 (GB)", fontsize=11)
     ax.set_title(f"{data['drive']} 体积 Top {len(labels)} 目录",
@@ -392,13 +555,12 @@ def make_donut(data):
     if other_sz > 0:
         sizes.append(other_sz)
         labels.append("其他")
-    # 配色：最大项金橙，其余绿色梯度，其他灰
-    colors = [ACCENT]
-    for i in range(1, len(sizes) - 1):
-        colors.append(PALETTE[i % len(PALETTE)])
+    # 配色：与 treemap/bar 统一——同一目录按全局排名取同一颜色（最大=金橙，其余=绿色梯度），其他灰
+    colors = [OTHER if nd.get("_synthetic") else color_for_index(i)
+              for i, nd in enumerate(top_nodes)]
     if other_sz > 0:
         colors.append(OTHER)
-    fig, ax = plt.subplots(figsize=(9, 9))
+    fig, ax = plt.subplots(figsize=(12, 8))
     wedges, texts, autotexts = ax.pie(
         sizes, labels=None, autopct=lambda p: f"{p:.1f}%",
         pctdistance=0.78, startangle=90,
@@ -445,7 +607,9 @@ def build_html(data, chart_treemap, chart_bar, chart_donut, font_name):
         share = (n["size"] / total * 100) if total else (n["size"] / scanned * 100 if scanned else 0)
         rows.append(
             f"<tr><td class='num'>{i}</td><td class='name'>{_esc(n['label'])}"
-            f"{' <span class=tag>文件</span>' if n['is_file'] else ''}</td>"
+            f"{' <span class=tag>文件</span>' if n['is_file'] else ''}"
+            f"{' <span class=tag style=\"background:#5b7a99\">🛡️系统</span>' if n.get('is_protected') else ''}"
+            f"{' <span class=tag style=\"background:#4a5b6e\">👁️隐藏</span>' if (n.get('hidden') and not n.get('is_protected')) else ''}</td>"
             f"<td class='num'>{human(n['size'])}</td>"
             f"<td class='num'>{share:.1f}%</td>"
             f"<td class='num'>{len(n['children'])}</td></tr>"
@@ -545,6 +709,168 @@ def _now():
 
 
 # ---------------------------------------------------------------------------
+# 文字分析报告（沿用「E 盘空间诊断」模板，精减版）
+# ---------------------------------------------------------------------------
+
+def build_report_blocks(data, capacity, scanned, denom):
+    """生成结构化的分析报告区块（供 Markdown / HTML 双格式复用）。
+    denom: 占比分母（容量或扫描合计）。"""
+    drive = data["drive"]
+    nodes = data["nodes"]
+    blocks = []
+    if capacity and capacity.get("total"):
+        c = capacity
+        pct = c.get("pct")
+        blocks.append(("h1", "磁盘空间诊断 · " + str(drive)))
+        blocks.append(("quote",
+            "只读扫描，未做任何删除/移动。%s 当前：总量 %s / 已用 %s / 剩余 %s（%s%% 满）。"
+            % (drive, human(c["total"]), human(c["used"]), human(c["free"]),
+               (pct if pct is not None else "—"))))
+    else:
+        blocks.append(("h1", "目录空间诊断 · " + str(drive)))
+        blocks.append(("quote", "只读扫描。扫描合计 %s。" % human(scanned)))
+
+    blocks.append(("note",
+        "说明：体积已包含隐藏文件与系统文件（如 pagefile.sys 虚拟内存、hiberfil.sys 休眠文件、"
+        "System Volume Information 还原点等），它们在资源管理器里默认不显示，因此某些目录的"
+        "所以某些目录的合计会明显大于你在资源管理器里看到的大小——这是正常的，不是重复计算。"
+        "条目按自身属性分别标注：🛡️系统=系统保留项，删除或移动会导致系统损坏，请勿动；"
+        "👁️隐藏=仅带隐藏属性（资源管理器默认不显示，多为配置/缓存），删除前先确认用途。"))
+
+    # 一、顶层目录体积排行
+    blocks.append(("h2", "一、顶层目录体积排行（降序）"))
+    header = ["排名", "目录", "体积", "占磁盘%", "较上次", "备注"]
+    rows = []
+    for i, n in enumerate(nodes, 1):
+        pct = round(n["size"] / denom * 100, 1) if denom else 0
+        d = n.get("delta_size")
+        if d is None:
+            dcell = "—"
+        elif d > 0:
+            dcell = "▲ +" + human(d)
+        elif d < 0:
+            dcell = "▼ -" + human(abs(d))
+        else:
+            dcell = "—"
+        note = ""
+        if pct >= 15:
+            note = "占比大"
+        elif pct >= 5:
+            note = "占比中"
+        if d is not None and d >= 5 * 1024 ** 3:
+            note = (note + "；🔥快增").lstrip("；")
+        if n.get("is_protected"):
+            note = (note + "；🛡️系统保留(勿删)").lstrip("；")
+        elif n.get("hidden"):
+            note = (note + "；👁️隐藏").lstrip("；")
+        rows.append([str(i), n["label"], human(n["size"]),
+                     "%.1f%%" % pct, dcell, note])
+    blocks.append(("table", header, rows))
+    if nodes:
+        top2 = nodes[:2]
+        s = sum(n["size"] for n in top2)
+        p = (s / denom * 100) if denom else 0
+        blocks.append(("p", "前两大目录合计 %s，占已扫描约 %.1f%%。" % (human(s), p)))
+
+    # 二、占用最大目录下钻
+    blocks.append(("h2", "二、占用最大目录下钻"))
+    if nodes and nodes[0].get("children"):
+        top = nodes[0]
+        blocks.append(("p", "下钻 %s（%s）的下级 Top 项：" % (top["label"], human(top["size"]))))
+        h2 = ["子目录", "体积"]
+        r2 = [[c["label"], human(c["size"])] for c in top["children"][:12]]
+        blocks.append(("table", h2, r2))
+    else:
+        blocks.append(("p", "（该扫描层级无下级明细）"))
+
+    # 三、较上次扫描增长最快
+    blocks.append(("h2", "三、较上次扫描增长最快"))
+    grows = [n for n in nodes if n.get("delta_size") and n["delta_size"] > 0]
+    grows.sort(key=lambda x: x["delta_size"], reverse=True)
+    if grows:
+        h3 = ["目录", "体积", "较上次", "间隔"]
+        r3 = []
+        for n in grows[:8]:
+            gap = n.get("days_gap")
+            r3.append([n["label"], human(n["size"]), "▲ +" + human(n["delta_size"]),
+                       ("%s天" % gap if gap is not None else "—")])
+        blocks.append(("table", h3, r3))
+    else:
+        blocks.append(("p", "（首次扫描或无历史数据，暂不显示增长；下次扫描后自动对比。）"))
+
+    # 四、结论与建议
+    blocks.append(("h2", "四、结论与建议（待你确认再执行）"))
+    top_name = nodes[0]["label"] if nodes else "—"
+    top_sz = human(nodes[0]["size"]) if nodes else "—"
+    items = [
+        "最大占比目录：%s（%s），优先排查其下的缓存/接收类文件。" % (top_name, top_sz),
+        "缓存/接收文件（微信缓存、下载、临时文件等）：备份后可清理或迁移，是腾空间最快来源。",
+        "稳定大文件/自产内容（视频、工程、文档）：属资产不应删除，建议归档迁移到更大容量盘。",
+        "其余大目录若属稳定存量、非近期猛增主因，按需再议。",
+    ]
+    blocks.append(("ul", items))
+    blocks.append(("quote", "⚠️ 以上为只读诊断。未经你明确确认具体文件/目录，不执行任何删除或移动。"))
+    return blocks
+
+
+def blocks_to_md(blocks):
+    out = []
+    for b in blocks:
+        t = b[0]
+        if t == "h1":
+            out.append("# " + b[1]); out.append("")
+        elif t == "h2":
+            out.append("## " + b[1]); out.append("")
+        elif t == "p":
+            out.append(b[1]); out.append("")
+        elif t == "quote":
+            out.append("> " + b[1]); out.append("")
+        elif t == "note":
+            out.append("> ℹ️ " + b[1]); out.append("")
+        elif t == "ul":
+            for it in b[1]:
+                out.append("- " + it)
+            out.append("")
+        elif t == "table":
+            hdr, rows = b[1], b[2]
+            out.append("| " + " | ".join(hdr) + " |")
+            out.append("|" + "|".join(["------"] * len(hdr)) + "|")
+            for r in rows:
+                out.append("| " + " | ".join(r) + " |")
+            out.append("")
+    return "\n".join(out)
+
+
+def blocks_to_html(blocks):
+    parts = []
+    for b in blocks:
+        t = b[0]
+        if t == "h1":
+            parts.append('<div class="rh1">' + _esc(b[1]) + '</div>')
+        elif t == "h2":
+            parts.append('<div class="rh2">' + _esc(b[1]) + '</div>')
+        elif t == "p":
+            parts.append('<div class="rp">' + _esc(b[1]) + '</div>')
+        elif t == "quote":
+            parts.append('<div class="rquote">' + _esc(b[1]) + '</div>')
+        elif t == "note":
+            parts.append('<div class="rnote">ℹ️ ' + _esc(b[1]) + '</div>')
+        elif t == "ul":
+            li = "".join('<li>' + _esc(it) + '</li>' for it in b[1])
+            parts.append('<ul class="rul">' + li + '</ul>')
+        elif t == "table":
+            hdr, rows = b[1], b[2]
+            th = "".join('<th>' + _esc(h) + '</th>' for h in hdr)
+            trs = []
+            for r in rows:
+                tds = "".join('<td>' + _esc(c) + '</td>' for c in r)
+                trs.append('<tr>' + tds + '</tr>')
+            parts.append('<table class="rtable"><thead><tr>' + th +
+                         '</tr></thead><tbody>' + "".join(trs) + '</tbody></table>')
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -590,21 +916,29 @@ def main():
         # 单目录模式：构造一个伪“磁盘”数据
         print(f"[*] 分析目录：{args.dir}")
         t0 = time.time()
-        total, children, files_size = scan_top(args.dir)
+        (total, children, children_flags, files_size,
+         _, _, files_hidden, files_list) = scan_top(args.dir)
         nodes = []
         for sub, sz in children.items():
+            _f = children_flags.get(sub) or {}
             nodes.append({"name": sub, "label": sub, "size": sz,
                           "children": [], "is_file": False,
-                          "path": os.path.join(args.dir, sub)})
-        if files_size > 0:
-            nodes.append({"name": "（该层文件）", "label": "（该层文件）",
-                          "size": files_size, "children": [], "is_file": True,
-                          "path": None})
+                          "path": os.path.join(args.dir, sub),
+                          "is_protected": _f.get("protected", False),
+                          "hidden": _f.get("hidden", False)})
+        # 该目录下的文件逐条列出
+        for f in files_list:
+            nodes.append({"name": f["name"], "label": f["name"], "size": f["size"],
+                          "children": [], "is_file": True,
+                          "path": f["path"], "mtime": f["mtime"],
+                          "is_protected": f["is_protected"],
+                          "hidden": f.get("hidden", False)})
         nodes.sort(key=lambda x: x["size"], reverse=True)
         data = {
             "drive": args.dir, "depth": 1, "scan_time": round(time.time() - t0, 1),
             "total_bytes": None, "free_bytes": None,
             "scanned_bytes": total, "nodes": nodes, "top": args.top,
+            "has_hidden_any": files_hidden,
         }
         ct = make_treemap(data, 1)
         cb = make_bar(data)

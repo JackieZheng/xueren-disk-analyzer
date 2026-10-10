@@ -1,7 +1,7 @@
 {
   "id": "xueren-disk-analyzer",
   "name": "雪人老师·磁盘空间分析器",
-  "version": "1.0.7",
+  "version": "1.0.9",
   "author": "雪人",
   "platforms": [
     "ima",

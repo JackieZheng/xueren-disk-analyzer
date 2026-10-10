@@ -42,7 +42,7 @@ _SERVER_PORT = 8780
 
 # 版本号：与 SKILL.md / meta.json 保持一致。
 # 页面 <title> 与顶部 <h1> 统一取此处（模板占位符 __VERSION__），避免多处硬编码漂移。
-VERSION = "1.0.7"
+VERSION = "1.0.9"
 
 # ---------------------------------------------------------------------------
 # 扫描历史（本地快照，用于计算「较上次扫描的体积变化 / 增长预警」）
@@ -519,6 +519,11 @@ td.nm .badge{margin-left:4px}
 .down .btn:hover{border-color:var(--acc);color:var(--acc)}
 /* 数值列表头右对齐，与数值单元格对齐（修复表头/值错位） */
 th.num{text-align:right}
+/* 居中列（最后修改/子项/操作）：表头与内容居中对齐 */
+th.ctr,td.ctr{text-align:center}
+td.ctr{font-variant-numeric:tabular-nums;white-space:nowrap}
+/* 明细表最后一列（操作）右侧留白，避免按钮紧贴卡片边缘 */
+#tbl th:last-child,#tbl td:last-child{padding-right:22px}
 /* 图表点击放大（lightbox） */
 .lightbox{position:fixed;inset:0;background:rgba(6,11,16,.93);display:none;align-items:center;justify-content:center;z-index:90;padding:22px;flex-direction:column;overflow:hidden}
 .lightbox.show{display:flex}
@@ -697,15 +702,15 @@ tbody tr.row-fast{background:rgba(224,114,26,.10)}
         <col style="width:112px">
         <col style="width:122px">
         <col style="width:46px">
-        <col style="width:90px">
+        <col style="width:134px">
       </colgroup>
       <thead><tr>
         <th data-k="idx">#</th><th data-k="name">名称</th>
         <th data-k="size" class="num">大小</th><th data-k="pct" class="num" title="占「本次扫描目标（当前盘符或当前目录）总量」的百分比，不是占整块磁盘容量">占目标%</th>
-        <th data-k="delta" class="num">变化(较上次)</th><th data-k="mtime" class="num">最后修改</th><th data-k="cnt" class="num">子项</th><th data-k="act" class="num">操作</th>
+        <th data-k="delta" class="ctr">变化(较上次)</th><th data-k="mtime" class="ctr">最后修改</th><th data-k="cnt" class="ctr">子项</th><th data-k="act" class="ctr">操作</th>
       </tr></thead><tbody id="tbody"></tbody></table>
       </div>
-      <div class="legend">🎨 标识：<b style="color:#d9534f">红底</b>=占用≥15% 占比大 · <b style="color:#e0a13a">橙底</b>=5%~15% 占比中 · <b style="color:#e0721a">🔥快增</b>=较上次扫描增≥5GB · <b style="color:#3fb27f">▼绿</b>=体积下降 · <b style="color:#5b7a99">🛡️系统</b>=Windows 系统保留项，<b>切勿删除或移动</b> · 👁️隐藏=该条目带隐藏属性，资源管理器默认不显示（<b style="color:#7d8fa3">名称显示为灰色</b>）。<b>占目标%</b>=占本次扫描目标（当前盘符或当前目录）总量的百分比，非整块磁盘容量。变化列 “—”=无历史/几乎无变化；基于本地扫描历史（首次扫描后开始记录，用于发现“吃空间”的目录/文件）。操作列 📂=打开（文件为「打开并选中」）、🔍=下钻分析（文件行置灰不可用，仅为保持布局一致）。</div>
+      <div class="legend">🎨 标识：<b style="color:#d9534f">红底</b>=占用≥15% 占比大 · <b style="color:#e0a13a">橙底</b>=5%~15% 占比中 · <b style="color:#e0721a">🔥快增</b>=较上次扫描增≥5GB · <b style="color:#3fb27f">▼绿</b>=体积下降 · <b style="color:#5b7a99">🛡️系统</b>=Windows 系统保留项，<b>切勿删除或移动</b> · 👁️隐藏=该条目带隐藏属性，资源管理器默认不显示（<b style="color:#7d8fa3">名称显示为灰色</b>）。<b>占目标%</b>=占本次扫描目标（当前盘符或当前目录）总量的百分比，非整块磁盘容量。变化列 “—”=无历史/几乎无变化；基于本地扫描历史（首次扫描后开始记录，用于发现“吃空间”的目录/文件）。操作列 📂=打开（文件为「打开并选中」）、🔍=下钻分析（文件行置灰不可用，仅为保持布局一致）、💡=问百度（不认识的文件/目录，点此跳转到百度搜索「它是什么、干什么用的」，免登录免费公开）。</div>
       <div class="note">ℹ️ <b>关于体积与隐藏文件</b>：目录体积为其<b>整棵子树</b>合计，文件为单个文件实际大小，两者都<b>包含隐藏文件与系统文件</b>（如 pagefile.sys 虚拟内存、hiberfil.sys 休眠文件、System Volume Information 还原点等），它们在资源管理器中默认不显示，所以某些目录的合计会明显大于你在资源管理器里看到的大小——这是正常的，不是重复计算、也不是 bug。条目按<b>自身属性</b>分别标注：<b>🛡️系统</b>=系统保留项（切勿删除）；<b>👁️隐藏</b>=带隐藏属性（资源管理器默认不显示，多为配置/缓存，删除前先确认用途）。两个标签<b>可同时出现</b>（如 pagefile.sys 既是系统文件也是隐藏文件），带隐藏属性的条目名称统一以灰色显示。</div>
     </div>
   </div>
@@ -990,10 +995,11 @@ function render(d){
       prodb += ' <span class="badge sys" title="Windows 系统保留目录/文件（如 Windows、Program Files、$Recycle.Bin、System Volume Information、pagefile.sys 等）。删除或移动会导致系统损坏，请勿动。">🛡️系统</span>';
     if(n.hidden)
       prodb += ' <span class="badge hid" title="该条目带「隐藏」属性，资源管理器默认不显示（需在“查看”中勾选“隐藏的项目”）。多为程序配置/缓存目录，删除前先确认用途。">👁️隐藏</span>';
-    // 操作列：📂 永远可用；🔍 仅目录可下钻，文件行保留按钮但置灰禁用（布局不变）
+    // 操作列：📂 打开 / 🔍 下钻 / 💡 问百度（识别未知文件或文件夹是什么）
     var act = n.path ? (
         '<button class="actbtn b-open" title="'+(n.is_file?'在资源管理器中打开并选中该文件':'打开该目录')+'">📂</button>'
         +'<button class="actbtn b-drill" title="'+(n.is_file?'该条目是文件，无法作为目录下钻分析（可用 📂 打开并选中）':'分析此目录')+'"'+(n.is_file?' disabled':'')+'>🔍</button>'
+        +'<button class="actbtn b-ask" title="不知道这是什么？点此在百度搜索「'+(n.is_file?'文件':'目录')+' 是干什么用的」">💡</button>'
       ) : '';
     // v1.0.3：主表格去掉 JS 中间省略，交给 CSS 单点截断；title 悬浮看全名。
   // 旧版 midEllipsis(label,36) 与 td.nm 的 text-overflow:ellipsis 叠加，中文长名会出现 A…B… 双省略。
@@ -1001,13 +1007,14 @@ function render(d){
     tr.dataset.mtime = (n.mtime==null?'':n.mtime);
     tr.innerHTML='<td>'+ (i+1) +'</td><td class="nm" title="'+esc(n.path||n.label)+'">'+nmCell+'</td>'
       +'<td class="num">'+n.size_human+'</td><td class="num">'+n.pct.toFixed(1)+'%</td>'
-      +'<td class="num">'+deltaHtml+growthBadge+'</td>'
-      +'<td class="num">'+n.mtime_human+'</td>'
-      +'<td class="num">'+(n.is_file?'—':n.cnt)+'</td><td class="num act">'+act+'</td>';
+      +'<td class="ctr">'+deltaHtml+growthBadge+'</td>'
+      +'<td class="ctr">'+n.mtime_human+'</td>'
+      +'<td class="ctr">'+(n.is_file?'—':n.cnt)+'</td><td class="ctr act">'+act+'</td>';
     tr.onclick=function(e){
       var t=e.target;
       if(t.closest('.b-open')){ if(n.path) openFolder(n.path); return; }
       if(t.closest('.b-drill')){ drillInto(n.path); return; }
+      if(t.closest('.b-ask')){ askBaidu(n.label, n.is_file); return; }
       if(n.path) openFolder(n.path);
     };
     tb.appendChild(tr);
@@ -1093,6 +1100,13 @@ function syncMDrive(){
   });
   if(cur && [].slice.call(s.options).some(function(o){return o.value===cur;})) s.value=cur;
   ddRender('mDrive');
+}
+// 遇到不认识的文件/目录：新标签页打开百度搜索（免登录、公开免费），按类型组织问句
+function askBaidu(name, isFile){
+  if(!name) return;
+  var q = name + (isFile ? ' 是什么文件 有什么用' : ' 是什么文件夹 是干什么用的');
+  var url = 'https://www.baidu.com/s?wd=' + encodeURIComponent(q);
+  window.open(url, '_blank');
 }
 function openDirPicker(){
   syncMDrive();

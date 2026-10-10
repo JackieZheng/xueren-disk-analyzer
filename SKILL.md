@@ -8,7 +8,7 @@ displayName: 雪人老师·磁盘空间分析器
 summary: 交互式磁盘空间分析（可选 C/D/E/F 或目录），图表展示占用，网页版带实时进度/可停止/点击打开目录。
 description_zh: 给定磁盘（C/D/E/F 任选、多选或全盘）或任意目录，交互式分析空间占用并以图表展示。命令行静态报告 + 网页交互版（深色「任务实时进度面板」风），纯 Python，零 CDN 离线自包含。
 description_en: Interactive disk space analyzer (choose C/D/E/F or a folder), visualize usage with charts; web UI with live progress card, stoppable scan, click-to-open folder.
-version: 1.0.7
+version: 1.0.9
 author: 雪人
 license: MIT
 allowed-tools: ""
@@ -33,7 +33,7 @@ metadata:
 1. **命令行静态报告**（`disk_analyzer.py`）—— 扫描指定磁盘/目录，输出一份**离线自包含 HTML 报告**：容量概览卡片 + 三张图表（①嵌套矩形树图 Treemap，面积=体积 ②Top N 横向条形图 ③环形占比图）+ 可点击表头排序的明细表。
 2. **网页交互版**（`disk_analyzer_web.py`）—— 本地 HTTP 服务 + 深色「任务实时进度面板」风 SPA，支持：盘符下拉（C/D/E/F）、目录选择器（系统对话框选文件夹）、**实时进度卡片**（显示当前正在扫描的目录/文件 + 百分比 + 流动光带）、**可随时停止**、**点击目录行打开所在位置**、**路径太长时中间省略号单行显示**。
 
-**硬指标**：纯 Python；依赖 matplotlib + squarify（本机 managed python 已装）；图表 base64 内嵌、**零 CDN、离线可用**；Windows 下自动注册微软雅黑中文字体，图表中文不方块。
+**硬指标**：纯 Python；依赖 matplotlib + squarify（本机 `D:\Python\Python312` 已装，通用解释器，跨 skill 共用）；图表 base64 内嵌、**零 CDN、离线可用**；Windows 下自动注册微软雅黑中文字体，图表中文不方块。
 
 ## 你的工作方式
 
@@ -49,14 +49,15 @@ metadata:
 
 ### Phase 1：准备与口径确认
 - 确认分析的盘符/目录；跨盘对比时逐个跑 `--disk`。
-- 依赖核验：`python -c "import matplotlib, squarify"`；缺失则 `pip install matplotlib squarify`。
+- 依赖核验：`D:/Python/Python312/python.exe -c "import matplotlib, squarify"`；缺失则装到同一个通用解释器：`D:/Python/Python312/python.exe -m pip install matplotlib squarify`。**禁止 `pip install --user`、禁止往 managed venv 装**（会导致跨 skill 环境割裂，每个 skill 各自装一份）。
 - **只读原则**：本工具只统计体积，**不删除/移动任何文件**；清理建议必须等用户确认再执行。
 
 ### Phase 2：执行扫描
-- 命令行：`python scripts/disk_analyzer.py --disk E --depth 2 --top 15 --out disk_report_E.html`
+- **统一用 `D:/Python/Python312/python.exe`**（本机通用 Python，已装 matplotlib/squarify 等常用库，跨 skill 共用，禁止另起 venv）
+- 命令行：`D:/Python/Python312/python.exe scripts/disk_analyzer.py --disk E --depth 2 --top 15 --out disk_report_E.html`
   - `--depth 1` 仅顶层、`2` 顶层+下一级（默认 2）；`--top N` 条形图/明细表取前 N；
   - `--workers` 并行度（默认按 CPU 自适应）；`--dir <路径>` 替代 `--disk` 分析单目录。
-- 网页版：`python scripts/disk_analyzer_web.py --port 8780` → 浏览器开 `http://127.0.0.1:8780/`
+- 网页版：`D:/Python/Python312/pythonw.exe scripts/disk_analyzer_web.py --port 8780` → 浏览器开 `http://127.0.0.1:8780/`（用 pythonw.exe 后台无窗口运行）
   - 加载后**不自动扫描**，显示空状态；用户选盘符/选目录后点「▶ 开始分析」。
   - 扫描中进度卡片实时显示「📍 当前：<目录>」与百分比；点「⏹ 停止」可中断（返回部分结果）。
   - 点目录行 / 行尾 📂 → 调资源管理器打开所在位置（仅本机已存在路径，防越权）。
@@ -102,6 +103,8 @@ metadata:
 
 ## 更新记录
 
+- **v1.0.9**（2026-10-10）—— 明细表对齐优化：①「最后修改 / 子项 / 操作」三列的表头与内容由右对齐改为**居中对齐**（新增 `th.ctr,td.ctr` 样式，单元格保留等宽数字）；②「操作」列右侧加 22px 留白（`#tbl :last-child{padding-right:22px}`），按钮不再紧贴卡片右边缘，列宽同步 112px→134px。其余数值列（大小 / 占目标% / 变化）保持右对齐不变。
+- **v1.0.8**（2026-10-10）—— 明细表「操作」列新增 💡 问百度：遇到不认识的文件或目录，点击图标直接新标签页打开百度搜索「它是什么、干什么用的」（按类型组织问句：文件→「是什么文件 有什么用」/ 目录→「是什么文件夹 干什么用的」），免登录、公开免费。操作列宽同步由 90px 加宽到 112px 容纳第三枚按钮；底部图例同步补充 💡 说明。
 - **v1.0.7**（2026-10-10）—— 「各盘符当前使用情况」标题补分级图例：四个状态词（充足 / 偏高 / 紧张 / 告急）前各加一枚对应颜色的圆形色块（`.drvlegend` / `.drvlg` / `.drvlg i`），颜色与卡片左侧分级色条一致，一眼看清「颜色 ↔ 等级」的对应关系。功能无变更。
 
 - **v1.0.6**（2026-10-10）—— 新增「各盘符当前使用情况」速览模块（置顶任务与盘符选择之间）：
@@ -151,7 +154,7 @@ metadata:
 ## 注意事项
 
 - **只读诊断（最高优先级）**：工具只统计体积，绝不删除/移动文件；清理建议须用户确认再执行。
-- **依赖**：需 matplotlib + squarify；本机 managed python（`~/.workbuddy/binaries/python/versions/3.13.12/python.exe`）已装。换环境先 `pip install matplotlib squarify`。
+- **依赖**：需 matplotlib + squarify；本机通用解释器 `D:/Python/Python312/python.exe` 已装（跨 skill 共用，不重复安装）。换环境先 `D:/Python/Python312/python.exe -m pip install matplotlib squarify`。**禁止 pip install --user 或往 managed venv 装**——会导致跨会话/跨 skill 各自装一份。
 - **中文字体**：`setup_cjk_font()` 在模块加载时注册微软雅黑，CLI 与网页版通用；未注册会导致图表中文变方块（tofu）。
 - **网页版不自动扫描**：加载只显示空状态，用户主动点「开始分析」才扫；避免一进来就长时间阻塞。
 - **服务连接状态（断连不再静默失效）**：网页版依赖本地 HTTP 服务（`disk_analyzer_web.py`）。若服务被关闭，页面顶部连接指示变「● 未连接」并显示红色「🔴 服务未连接」横幅（含一键复制启动命令）；此时点「开始分析」会明确提示「先启动服务」，而非静默失效。交付/修复时务必先确认服务在监听：`curl --noproxy 127.0.0.1 http://127.0.0.1:8780/ping` 返回 `{"ok":true}`。

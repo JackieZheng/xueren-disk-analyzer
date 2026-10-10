@@ -40,6 +40,10 @@ SCANS = {}
 _SERVER_HOST = "127.0.0.1"
 _SERVER_PORT = 8780
 
+# 版本号：与 SKILL.md / meta.json 保持一致。
+# 页面 <title> 与顶部 <h1> 统一取此处（模板占位符 __VERSION__），避免多处硬编码漂移。
+VERSION = "1.0.5"
+
 # ---------------------------------------------------------------------------
 # 扫描历史（本地快照，用于计算「较上次扫描的体积变化 / 增长预警」）
 # ---------------------------------------------------------------------------
@@ -321,7 +325,7 @@ def handle_browse(handler, qs):
 PAGE = r"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>磁盘空间分析器</title>
+<title>磁盘空间分析器 Ver：__VERSION__</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='26' height='26' rx='7' fill='%2316212c' stroke='%233fb27f' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233fb27f' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='1.8' fill='%23e0a13a'/%3E%3Cline x1='16' y1='16' x2='21' y2='11' stroke='%23e0a13a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
 :root{--bg:#0f1720;--card:#16212c;--line:#27384a;--tx:#e8eef5;--sub:#93a7bb;
@@ -331,7 +335,6 @@ body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.6 "Microsoft YaHe
 .topbar{background:linear-gradient(135deg,#13202b,#1b2b38);border-bottom:1px solid var(--line);padding:14px clamp(12px,2.2vw,22px)}
 .topbar h1{margin:0;font-size:19px;display:flex;align-items:center;gap:9px}
 .topbar .hicon{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;line-height:1}
-.topbar .ver{font-size:12px;font-weight:400;color:var(--sub);font-variant-numeric:tabular-nums;letter-spacing:.2px;margin-left:2px}
 .sub{color:var(--sub);font-size:12px;margin-top:5px;word-break:break-word}
 .wrap{max-width:1200px;margin:0 auto;padding:0 clamp(4px,1vw,8px)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px;overflow:hidden}
@@ -418,14 +421,21 @@ select,input,button{font-family:inherit}
 .ct{font-size:14px;color:var(--tx);font-weight:600;margin-bottom:9px}
 .ct .hint{color:var(--sub);font-weight:400;font-size:12px}
 .chart{width:100%;height:auto;display:block;border-radius:10px;background:var(--ink);cursor:zoom-in}
-table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:8px}
-th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:8px;table-layout:fixed;min-width:720px}
+.tbl-wrap{overflow-x:auto;margin-top:8px;border-radius:12px}
+.tbl-wrap table{margin-top:0}
+.tbl-wrap::-webkit-scrollbar{height:8px}
+.tbl-wrap::-webkit-scrollbar-track{background:#0d1620;border-radius:8px}
+.tbl-wrap::-webkit-scrollbar-thumb{background:#31465c;border-radius:8px;border:2px solid #0d1620}
+.tbl-wrap::-webkit-scrollbar-thumb:hover{background:#43607c}
+.tbl-wrap{scrollbar-width:thin;scrollbar-color:#31465c #0d1620}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:13px;vertical-align:middle}
 th{background:#1b2a36;color:var(--sub);cursor:pointer;user-select:none;white-space:nowrap}
 th:hover{color:var(--tx)}
 th.asc::after{content:" ▲";color:var(--acc)}
 th.desc::after{content:" ▼";color:var(--acc)}
-td.num{text-align:right;font-variant-numeric:tabular-nums}
-td.nm{max-width:440px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:4px;padding-right:9px}
+td.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;word-break:break-all}
 tbody tr{cursor:pointer;transition:.12s}
 tbody tr:hover{background:#1c2c38}
 .tag{background:var(--acc2);color:#2a1c05;font-size:11px;padding:1px 6px;border-radius:6px;margin-left:4px}
@@ -524,13 +534,45 @@ tbody tr.row-fast{background:rgba(224,114,26,.10)}
 .report .rul{margin:8px 0;padding-left:20px;font-size:13px;color:var(--sub);line-height:1.85}
 .report .rul li{margin:3px 0}
 .report .rul li b{color:var(--tx)}
-.report table{margin:8px 0}
-.report table th{background:#1b2a36;color:var(--sub);font-size:12px;padding:7px 10px;text-align:left;border-bottom:1px solid var(--line)}
+.report table{margin:8px 0;table-layout:auto;min-width:100%}
+.report table th{background:#1b2a36;color:var(--sub);font-size:12px;padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
 .report table td{font-size:12.5px;padding:7px 10px;border-bottom:1px solid var(--line);color:var(--tx)}
+.report table td.cnum{white-space:nowrap;width:1%;padding-left:6px;padding-right:9px}
+.report table td .nmcell{display:inline-block;max-width:560px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* v1.0.3 响应式：窄屏时收紧卡片/表头/统计表，防止布局撑破 */
+@media (max-width: 960px){
+  .wrap{max-width:none;padding:0 10px}
+  .card{padding:12px}
+  .stat{min-width:104px;flex:1 1 104px;padding:8px 10px 8px 9px}
+  .stat .v{font-size:16px}
+  .grid{grid-template-columns:1fr;gap:10px}
+  .toolbar{gap:8px}
+  th,td{padding:8px 9px}
+  .ddbtn{min-width:56px}
+}
+@media (max-width: 640px){
+  body{padding:8px}
+  .topbar{padding:12px 10px}
+  .topbar h1{font-size:17px;flex-wrap:wrap}
+  .sub{font-size:11px}
+  .card{padding:10px}
+  .ct{font-size:13px}
+  .ct .hint{font-size:11px}
+  .stat{min-width:0;flex:1 1 calc(50% - 6px);padding:7px 9px}
+  .stat .v{font-size:14px}
+  .stat .k{font-size:10px}
+  th,td{padding:7px 8px;font-size:12px}
+  .btn{padding:6px 11px;font-size:12px}
+  .actbtn{padding:2px 7px;font-size:12px}
+  .tag{font-size:10px;padding:1px 5px}
+  .legend,.note{font-size:11.5px;line-height:1.55}
+  .dirwrap{min-width:130px}
+  .mpanel{width:96vw;max-height:88vh}
+}
 </style></head>
 <body>
 <div class="topbar"><div class="wrap">
-  <h1><span class="hicon"><svg width="24" height="24" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7" fill="none" stroke="#3fb27f" stroke-width="2"/><circle cx="16" cy="16" r="7" fill="none" stroke="#3fb27f" stroke-width="2"/><circle cx="16" cy="16" r="1.8" fill="#e0a13a"/><line x1="16" y1="16" x2="21" y2="11" stroke="#e0a13a" stroke-width="2" stroke-linecap="round"/></svg></span> 磁盘空间分析器 <span class="ver">· Ver:1.0.0</span></h1>
+  <h1><span class="hicon"><svg width="24" height="24" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7" fill="none" stroke="#3fb27f" stroke-width="2"/><circle cx="16" cy="16" r="7" fill="none" stroke="#3fb27f" stroke-width="2"/><circle cx="16" cy="16" r="1.8" fill="#e0a13a"/><line x1="16" y1="16" x2="21" y2="11" stroke="#e0a13a" stroke-width="2" stroke-linecap="round"/></svg></span> 磁盘空间分析器 Ver：__VERSION__</h1>
   <div class="sub" id="hdr">选择盘符或目录后开始分析 —— 实时显示当前扫描位置，可随时停止。<span id="conn" class="conn">● 连接中…</span></div>
 </div></div>
 <div class="wrap">
@@ -585,11 +627,24 @@ tbody tr.row-fast{background:rgba(224,114,26,.10)}
   <div id="tablewrap" class="area">
     <div class="card">
       <div class="ct">📋 目录与文件明细 <span class="hint">（点击表头排序 · 点击行打开所在目录 · 变化列按上次扫描快照计算）</span></div>
-      <table id="tbl"><thead><tr>
+      <div class="tbl-wrap">
+      <table id="tbl">
+      <colgroup>
+        <col style="width:40px">
+        <col style="width:auto">
+        <col style="width:82px">
+        <col style="width:66px">
+        <col style="width:112px">
+        <col style="width:122px">
+        <col style="width:46px">
+        <col style="width:90px">
+      </colgroup>
+      <thead><tr>
         <th data-k="idx">#</th><th data-k="name">名称</th>
         <th data-k="size" class="num">大小</th><th data-k="pct" class="num" title="占「本次扫描目标（当前盘符或当前目录）总量」的百分比，不是占整块磁盘容量">占目标%</th>
         <th data-k="delta" class="num">变化(较上次)</th><th data-k="mtime" class="num">最后修改</th><th data-k="cnt" class="num">子项</th><th data-k="act" class="num">操作</th>
       </tr></thead><tbody id="tbody"></tbody></table>
+      </div>
       <div class="legend">🎨 标识：<b style="color:#d9534f">红底</b>=占用≥15% 占比大 · <b style="color:#e0a13a">橙底</b>=5%~15% 占比中 · <b style="color:#e0721a">🔥快增</b>=较上次扫描增≥5GB · <b style="color:#3fb27f">▼绿</b>=体积下降 · <b style="color:#5b7a99">🛡️系统</b>=Windows 系统保留项，<b>切勿删除或移动</b> · 👁️隐藏=该条目带隐藏属性，资源管理器默认不显示（<b style="color:#7d8fa3">名称显示为灰色</b>）。<b>占目标%</b>=占本次扫描目标（当前盘符或当前目录）总量的百分比，非整块磁盘容量。变化列 “—”=无历史/几乎无变化；基于本地扫描历史（首次扫描后开始记录，用于发现“吃空间”的目录/文件）。操作列 📂=打开（文件为「打开并选中」）、🔍=下钻分析（文件行置灰不可用，仅为保持布局一致）。</div>
       <div class="note">ℹ️ <b>关于体积与隐藏文件</b>：目录体积为其<b>整棵子树</b>合计，文件为单个文件实际大小，两者都<b>包含隐藏文件与系统文件</b>（如 pagefile.sys 虚拟内存、hiberfil.sys 休眠文件、System Volume Information 还原点等），它们在资源管理器中默认不显示，所以某些目录的合计会明显大于你在资源管理器里看到的大小——这是正常的，不是重复计算、也不是 bug。条目按<b>自身属性</b>分别标注：<b>🛡️系统</b>=系统保留项（切勿删除）；<b>👁️隐藏</b>=带隐藏属性（资源管理器默认不显示，多为配置/缓存，删除前先确认用途）。两个标签<b>可同时出现</b>（如 pagefile.sys 既是系统文件也是隐藏文件），带隐藏属性的条目名称统一以灰色显示。</div>
     </div>
@@ -831,7 +886,9 @@ function render(d){
         '<button class="actbtn b-open" title="'+(n.is_file?'在资源管理器中打开并选中该文件':'打开该目录')+'">📂</button>'
         +'<button class="actbtn b-drill" title="'+(n.is_file?'该条目是文件，无法作为目录下钻分析（可用 📂 打开并选中）':'分析此目录')+'"'+(n.is_file?' disabled':'')+'>🔍</button>'
       ) : '';
-    var nmCell='<span class="nmname'+(n.hidden?' dim':'')+'">'+esc(midEllipsis(n.label, 36))+'</span>'+sizeBadge+tag+prodb;
+    // v1.0.3：主表格去掉 JS 中间省略，交给 CSS 单点截断；title 悬浮看全名。
+  // 旧版 midEllipsis(label,36) 与 td.nm 的 text-overflow:ellipsis 叠加，中文长名会出现 A…B… 双省略。
+  var nmCell='<span class="nmname'+(n.hidden?' dim':'')+'">'+esc(n.label)+'</span>'+sizeBadge+tag+prodb;
     tr.dataset.mtime = (n.mtime==null?'':n.mtime);
     tr.innerHTML='<td>'+ (i+1) +'</td><td class="nm" title="'+esc(n.path||n.label)+'">'+nmCell+'</td>'
       +'<td class="num">'+n.size_human+'</td><td class="num">'+n.pct.toFixed(1)+'%</td>'
@@ -1174,7 +1231,8 @@ class Handler(BaseHTTPRequestHandler):
             start_cmd = 'python "%s" --port %d' % (os.path.abspath(__file__), _SERVER_PORT)
             last = _load_last() or {}
             body = PAGE.replace("__START_CMD__", start_cmd).replace(
-                "__LAST_TARGET__", json.dumps(last, ensure_ascii=False))
+                "__LAST_TARGET__", json.dumps(last, ensure_ascii=False)).replace(
+                "__VERSION__", VERSION)
             self._send(200, body, "text/html; charset=utf-8")
         elif u.path == "/favicon.ico":
             self._send(204, b"")

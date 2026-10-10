@@ -451,16 +451,67 @@ def _lighten(hexc, amt=0.3):
 def _fmt_png(fig):
     buf = io.BytesIO()
     # 不使用 bbox_inches="tight"：保证三张图都是固定的 12×8×dpi 尺寸，视觉上等大
-    fig.savefig(buf, format="png", dpi=140, facecolor="white")
+    fig.savefig(buf, format="png", dpi=CHART_DPI, facecolor="white")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+CHART_DPI = 140   # 图表输出 DPI（treemap 估算可容纳字符数时也用它）
+FIG_W, FIG_H = 12, 8
+
+
+def _mid_ellipsis(s, maxlen):
+    """过长名称中间省略：保留首尾（尾部多留几字，保住 .pptx/.pdf 等扩展名）。
+    与网页版 JS midEllipsis 同一口径；maxlen<4 时退化为头部截断。"""
+    s = str(s)
+    if len(s) <= maxlen:
+        return s
+    if maxlen <= 4:
+        return s[:maxlen]
+    tail = max(2, maxlen // 4)
+    head = maxlen - tail - 1
+    return s[:head] + "…" + s[-tail:]
+
+
+def _fig_frac_x(fig, renderer, x_display):
+    """显示坐标 -> 图宽比例（0~1）。"""
+    return fig.transFigure.inverted().transform((x_display, 0))[0]
+
+
+def _title_drive(data, cap=48):
+    """图表标题里的目标名：整盘是盘符，--dir 模式是完整路径，过长中间省略。"""
+    return _mid_ellipsis(str(data["drive"]), cap)
+
+
+def _shrink_ylabels(fig, ax, max_left=0.34, min_len=6, pad=0.015):
+    """y 轴刻度标签「动态计算」适配（全程渲染器实测，无固定字数假设）：
+    1) 实测完整显示全部标签所需的左边距，动态加宽（上限 max_left，防止吃掉绘图区）；
+    2) 加宽到上限后仍被画布左缘削掉（bb.x0<0）的标签，逐条中间收缩直到放进画布。
+    须在 fig.canvas.draw() 之后调用。"""
+    renderer = fig.canvas.get_renderer()
+    min_x0 = min((_fig_frac_x(fig, renderer, t.get_window_extent(renderer=renderer).x0)
+                  for t in ax.get_yticklabels()
+                  if t.get_window_extent(renderer=renderer).width > 0),
+                 default=1.0)
+    need = ax.get_position().x0 - min_x0 + pad
+    if need > ax.get_position().x0:
+        fig.subplots_adjust(left=min(max_left, max(0.01, need)))
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    for t in ax.get_yticklabels():
+        s = t.get_text()
+        while len(s) > min_len and t.get_window_extent(renderer=renderer).x0 < 0:
+            s = _mid_ellipsis(s, max(min_len, len(s) - 2))
+            t.set_text(s)
+
+
 def make_treemap(data, max_depth):
-    """嵌套矩形树图（treemap）。depth=1 只画顶层；depth=2 顶层+下级。"""
-    fig, ax = plt.subplots(figsize=(12, 8))
+    """嵌套矩形树图（treemap）。depth=1 只画顶层；depth=2 顶层+下级。
+    标签收缩用渲染器实测文字宽度、按矩形实测像素宽收敛——
+    不用「数据单位≈fig.dpi 像素」估算（坐标区默认只占画布 77.5%，会系统性偏宽）。"""
+    fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
     ax.set_axis_off()
-    W, H = 12, 8
+    W, H = FIG_W, FIG_H
     total_area = W * H
 
     # 顶层节点（cap 到 30 个，其余并入“其他”）
@@ -475,17 +526,34 @@ def make_treemap(data, max_depth):
     vals = squarify.normalize_sizes(vals, W, H)
     rects = squarify.squarify(vals, 0, 0, W, H)
 
+    # (text_artist, 矩形数据单位宽) 列表：绘制完成后用渲染器实测文字宽，
+    # 超出矩形则逐步收缩标签——估算公式对 CJK+ASCII 混排不准，实测才可靠
+    fit_texts = []
+
     def draw_leaf(node, x, y, w, h, color):
         ax.add_patch(Rectangle((x, y), w, h, facecolor=color,
                                edgecolor="white", linewidth=1.2))
         frac = (w * h) / total_area
         if frac > 0.006 and h > 0.25:
             fs = max(7, min(15, int((w * h) ** 0.32)))
-            label = node["label"]
-            if len(label) > 22:
-                label = label[:21] + "…"
-            ax.text(x + w / 2, y + h / 2, label, color="white",
-                    ha="center", va="center", fontsize=fs, fontweight="bold")
+            label = _mid_ellipsis(node["label"], 26)
+            t = ax.text(x + w / 2, y + h / 2, label, color="white",
+                        ha="center", va="center", fontsize=fs, fontweight="bold")
+            fit_texts.append((t, w))
+
+    def shrink_to_fit():
+        """实测每条标签宽度，超宽则中间收缩直到放进矩形。
+        每数据单位的真实像素用 ax.transData 变换求出（自动兼容坐标区
+        占比、fig.dpi 与 savefig dpi 的任何差异——等比缩放不改比例）。"""
+        renderer = fig.canvas.get_renderer()
+        ppu = (ax.transData.transform((1, 0))[0]
+               - ax.transData.transform((0, 0))[0])   # px / 数据单位
+        for t, w_units in fit_texts:
+            max_px = w_units * ppu * 0.90             # 矩形像素宽（留 10% 余量）
+            s = t.get_text()
+            while len(s) > 4 and t.get_window_extent(renderer=renderer).width > max_px:
+                s = _mid_ellipsis(s, max(4, len(s) - 2))
+                t.set_text(s)
 
     def rec(node, x, y, w, h, depth, base):
         ch = node.get("children") or []
@@ -515,23 +583,27 @@ def make_treemap(data, max_depth):
     ax.set_xlim(0, W)
     ax.set_ylim(0, H)
     ax.invert_yaxis()
-    ax.set_title(f"{data['drive']} 磁盘空间分布（矩形面积=体积，depth={data['depth']}）",
+    ax.set_title(f"{_title_drive(data)} 磁盘空间分布（矩形面积=体积，depth={data['depth']}）",
                  fontsize=14, fontweight="bold", color="#1b5e20", pad=10)
+    fig.canvas.draw()
+    shrink_to_fit()
     return _fmt_png(fig)
 
 
 def make_bar(data):
-    """横向条形图：Top N 目录。"""
+    """横向条形图：Top N 目录。
+    y 轴长名由 _shrink_ylabels 实测动态适配：先按需动态加宽左边距（设上限，
+    防止吃掉绘图区），仍被画布左缘削掉的标签逐条中间收缩——不做固定字数假设。"""
     nodes_top = data["nodes"][:data["top"]]
     rev = nodes_top[::-1]
-    labels = [n["label"] for n in rev]
+    labels = [_mid_ellipsis(n["label"], 40) for n in rev]
     sizes = [n["size"] / 1024 ** 3 for n in rev]  # GB
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
     colors = [OTHER if n.get("_synthetic") else color_for_index(i)
               for i, n in enumerate(nodes_top)][::-1]
     bars = ax.barh(labels, sizes, color=colors, edgecolor="white")
     ax.set_xlabel("体积 (GB)", fontsize=11)
-    ax.set_title(f"{data['drive']} 体积 Top {len(labels)} 目录",
+    ax.set_title(f"{_title_drive(data)} 体积 Top {len(labels)} 目录",
                  fontsize=13, fontweight="bold", color="#1b5e20")
     ax.tick_params(axis="y", labelsize=10)
     mx = max(sizes) if sizes else 1
@@ -541,11 +613,17 @@ def make_bar(data):
     ax.set_xlim(0, mx * 1.12)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+    fig.canvas.draw()
+    _shrink_ylabels(fig, ax)
     return _fmt_png(fig)
 
 
 def make_donut(data):
-    """环形图：Top N + 其他。"""
+    """环形图：Top N + 其他。
+    图例名称过长会伸出画布右缘被截断 —— 百分比并入图例文案，
+    小切片（<2.5%）不再往扇区上叠百分比文字（避免互相糊成一团）；
+    图例宽度全程实测动态处理：右缘越界先整体左移饼图腾空间，
+    仍越界则迭代中间收缩最宽的图例项（不做固定字数假设）。"""
     nodes = data["nodes"]
     n = data["top"]
     top_nodes = nodes[:n]
@@ -560,9 +638,10 @@ def make_donut(data):
               for i, nd in enumerate(top_nodes)]
     if other_sz > 0:
         colors.append(OTHER)
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
     wedges, texts, autotexts = ax.pie(
-        sizes, labels=None, autopct=lambda p: f"{p:.1f}%",
+        sizes, labels=None,
+        autopct=lambda p: (f"{p:.1f}%" if p >= 2.5 else ""),
         pctdistance=0.78, startangle=90,
         wedgeprops=dict(width=0.42, edgecolor="white", linewidth=1.5),
         colors=colors,
@@ -570,10 +649,38 @@ def make_donut(data):
     for t in autotexts:
         t.set_fontsize(9)
         t.set_color("#222")
-    ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
-              fontsize=9, frameon=False)
-    ax.set_title(f"{data['drive']} 体积占比（Top {min(n, len(nodes))}）",
+    total_sz = sum(sizes) or 1
+    legend_labels = [
+        f"{_mid_ellipsis(lb, 24)}  {sz / total_sz * 100:.1f}%"
+        for lb, sz in zip(labels, sizes)
+    ]
+    leg = ax.legend(wedges, legend_labels, loc="center left",
+                    bbox_to_anchor=(1.0, 0.5), fontsize=9, frameon=False)
+    ax.set_title(f"{_title_drive(data)} 体积占比（Top {min(n, len(nodes))}）",
                  fontsize=13, fontweight="bold", color="#1b5e20")
+    fig.canvas.draw()
+    # 全程实测：图例右缘越界先左移饼图腾空间；仍越界则迭代收缩最宽的图例项
+    renderer = fig.canvas.get_renderer()
+    right = _fig_frac_x(fig, renderer, leg.get_window_extent(renderer=renderer).x1)
+    if right > 0.995:
+        shift = right - 0.985
+        pos = ax.get_position()
+        ax.set_position([max(0.0, pos.x0 - shift), pos.y0,
+                         pos.x1 - pos.x0, pos.y1 - pos.y0])
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    for _ in range(40):
+        right = _fig_frac_x(fig, renderer, leg.get_window_extent(renderer=renderer).x1)
+        if right <= 0.995:
+            break
+        widest, w = max(((lt, lt.get_window_extent(renderer=renderer).width)
+                         for lt in leg.get_texts()), key=lambda p: p[1])
+        name, sep, pct = widest.get_text().rpartition("  ")
+        if len(name) <= 6:
+            break
+        widest.set_text(_mid_ellipsis(name, max(6, len(name) - 2)) + sep + pct)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
     return _fmt_png(fig)
 
 
@@ -606,7 +713,7 @@ def build_html(data, chart_treemap, chart_bar, chart_donut, font_name):
     for i, n in enumerate(data["nodes"], 1):
         share = (n["size"] / total * 100) if total else (n["size"] / scanned * 100 if scanned else 0)
         rows.append(
-            f"<tr><td class='num'>{i}</td><td class='name'>{_esc(n['label'])}"
+            f"<tr><td class='num'>{i}</td><td class='name' title=\"{_esc(n['label'])}\">{_esc(n['label'])}"
             f"{' <span class=tag>文件</span>' if n['is_file'] else ''}"
             f"{' <span class=tag style=\"background:#5b7a99\">🛡️系统</span>' if n.get('is_protected') else ''}"
             f"{' <span class=tag style=\"background:#4a5b6e\">👁️隐藏</span>' if (n.get('hidden') and not n.get('is_protected')) else ''}</td>"
@@ -860,13 +967,24 @@ def blocks_to_html(blocks):
             parts.append('<ul class="rul">' + li + '</ul>')
         elif t == "table":
             hdr, rows = b[1], b[2]
+            # 名称列识别：表头含「目录/子目录/名称/文件」的列，超长名省略+悬浮看全名
+            name_cols = {i for i, h in enumerate(hdr)
+                         if any(k in str(h) for k in ("目录", "子目录", "名称", "文件"))}
             th = "".join('<th>' + _esc(h) + '</th>' for h in hdr)
             trs = []
             for r in rows:
-                tds = "".join('<td>' + _esc(c) + '</td>' for c in r)
+                tds = ""
+                for i, c in enumerate(r):
+                    if i in name_cols and str(c).strip():
+                        # 内层 span 定宽省略，title 悬浮看全名（与明细表一致）
+                        tds += '<td><span class="nmcell" title="' + _esc(c) + '">' + _esc(c) + '</span></td>'
+                    else:
+                        # 数字/备注等短列压缩宽度（width:1%+nowrap），把空间让给名称列
+                        tds += '<td class="cnum">' + _esc(c) + '</td>'
                 trs.append('<tr>' + tds + '</tr>')
-            parts.append('<table class="rtable"><thead><tr>' + th +
-                         '</tr></thead><tbody>' + "".join(trs) + '</tbody></table>')
+            # tbl-wrap 包裹：表格超宽时横向滚动（与明细表一致）
+            parts.append('<div class="tbl-wrap"><table class="rtable"><thead><tr>' + th +
+                         '</tr></thead><tbody>' + "".join(trs) + '</tbody></table></div>')
     return "\n".join(parts)
 
 

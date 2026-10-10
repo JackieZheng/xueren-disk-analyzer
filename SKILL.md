@@ -8,7 +8,7 @@ displayName: 雪人老师·磁盘空间分析器
 summary: 交互式磁盘空间分析（可选 C/D/E/F 或目录），图表展示占用，网页版带实时进度/可停止/点击打开目录。
 description_zh: 给定磁盘（C/D/E/F 任选、多选或全盘）或任意目录，交互式分析空间占用并以图表展示。命令行静态报告 + 网页交互版（深色「任务实时进度面板」风），纯 Python，零 CDN 离线自包含。
 description_en: Interactive disk space analyzer (choose C/D/E/F or a folder), visualize usage with charts; web UI with live progress card, stoppable scan, click-to-open folder.
-version: 1.0.2
+version: 1.0.5
 author: 雪人
 license: MIT
 allowed-tools: ""
@@ -102,6 +102,25 @@ metadata:
 
 ## 更新记录
 
+- **v1.0.5**（2026-10-10）—— 图表长名全实测动态收缩 + 表格列宽优化：
+  1. **条形图**：`_fit_left_margin` 升级为 `_shrink_ylabels`——实测全部标签所需左边距动态加宽（上限 34% 画布宽，防吃掉绘图区），到上限仍被画布左缘削掉的标签逐条中间收缩直到放进画布；初始 cap 22→40 字。**不再有固定字数假设，全程渲染器实测**。
+  2. **环形图**：图例初始 cap 16→24 字；右缘越界先左移饼图腾空间，仍越界则**迭代收缩最宽图例项**（`rpartition("  ")` 保住尾部百分比）。
+  3. **明细表列宽压缩**（网页版）：`td.num` 加 `nowrap` + 紧凑 padding（左 4 右 9），colgroup 44/90/88/120/130/56/104 → 40/82/66/112/122/46/90，固定列合计 632→558px，名称列多拿 ~74px。
+  4. **报告表格列宽修正**：根源是全局 `table{table-layout:fixed;min-width:720px}` 令报告表各列**均分**、名称列只拿 1/6——`.report table` 覆盖为 `table-layout:auto;min-width:100%`，非名称列加 `td.cnum`（`width:1%+nowrap`）压缩到内容宽，`nmcell` 上限 300→560px；表格外包 `.tbl-wrap`（超宽时横向滚动，与明细表一致）。
+  5. **旧缓存陷阱（重要）**：网页版打开时还原「上次扫描快照」（`disk_analyzer_last_result.json`），快照里的图表是**生成时的 base64**——改绘图代码后必须重新扫描才能看到新效果；用户报「图表还没修好」时先分辨是缓存旧图还是真回归。本次已清除旧快照。
+
+- **v1.0.4**（2026-10-10）—— 报告表格长名显示修复 + 标题统一：
+  1. **报告三张表长名处理**：诊断报告（`build_report_blocks` → `blocks_to_html`）的「顶层目录体积排行（降序）」「占用最大目录下钻」「较上次扫描增长最快」三张表，名称列改内层 `span.nmcell`（定宽 300px 省略）+ `title` 悬浮看全名——旧版原样输出完整长名且网页端无宽度约束，超长名溢出/显示不全。截断交给 CSS 单点负责（与明细表口径一致），HTML 仍输出全名供 `title` 与页面内查找。
+  2. **网页标题与顶部标题统一**：`<title>` 与顶部 `<h1>` 统一为「磁盘空间分析器 Ver：{版本}」（全角冒号），h1 保留 SVG 图标；版本号改为单一来源——新增 `VERSION` 常量 + 模板占位符 `__VERSION__`（复用 `__START_CMD__` 替换链），消除 title/h1 两处硬编码漂移；删除已废弃的 `.topbar .ver` 样式与 `<span class="ver">· Ver:x.y.z</span>`。
+  3. CLI 报告（`build_html`）明细表名称列补 `title` 悬浮看全名。
+
+- **v1.0.3**（2026-10-10）—— 三张图表长名显示修复 + 网页版窄屏优化：
+  1. **排行图（条形图）**：y 轴长名中间省略（`_mid_ellipsis`，保留首尾与扩展名），并用渲染器实测标签宽度**动态加宽左边距**（`_fit_left_margin`）——旧版直接用原始长名，超出默认左边距被画布左缘削掉一截。
+  2. **环形图**：图例名称中间省略到 16 字、**百分比并入图例文案**；小切片（<2.5%）不再往扇区上叠百分比文字（避免互相糊成一团）；实测图例右缘越界时**自动左移饼图坐标区**——旧版图例长名伸出画布右缘被截断。
+  3. **树图（Treemap）**：标签按矩形**实测像素宽自动收缩**（`shrink_to_fit`：用 `ax.transData` 求每数据单位真实像素 + 渲染器实测文字宽，超宽逐步中间收缩）——旧版「头部截断+尾部省略」既丢扩展名（.pptx 等）也不随矩形宽度自适应，长名还会溢出压到邻格。**注意勿改回估算公式**：坐标区默认只占画布 77.5%，按「数据单位=fig.dpi 像素」估算会系统性偏宽 ~29%。
+  4. 三图标题的目标名（--dir 模式为完整路径）过长时中间省略（上限 48 字）。
+  5. **网页版明细表窄屏优化**：表格加横向滚动容器（`.tbl-wrap` + `colgroup` 定列宽），新增 ≤960px / ≤640px 两档响应式媒体查询；名称列去掉 JS 中间省略改 CSS 单行尾部省略（`title` 悬浮看全名），修复中文长名 `A…B…` 双省略号叠加。
+
 - **v1.0.2**（2026-10-09）—— 修 SkillHub 图裂：README 中的截图引用由本地相对路径 `assets/screenshot.png` 改为 GitHub raw 外链 `https://raw.githubusercontent.com/JackieZheng/xueren-disk-analyzer/main/assets/screenshot.png`（SkillHub 拒收 png 附件，需走外链）。功能无变更。
 
 - **v1.0.1**（2026-10-09）—— 详情页 4 项 UX/口径修正：
@@ -134,4 +153,5 @@ metadata:
 - **squarify 坑**：treemap 面积必须先用 `normalize_sizes(sizes, dx, dy)` 归一化到总面积，否则大体积磁盘会让矩形宽达 1e11 像素致渲染崩溃（已在代码内修好，勿改回传原始字节）。
 - **属性标签口径**：🛡️系统 = 系统白名单（`pagefile.sys`/`$Recycle.Bin`/`Windows.old` 等）或 `FILE_ATTRIBUTE_SYSTEM`；👁️隐藏 = `FILE_ATTRIBUTE_HIDDEN`。文件行两者独立、可共存；目录行仍按"系统优先"只挂一个标签以保持视觉简洁。隐藏条目名统一 `.nmname.dim` 灰色显示。
 - **占目标%**：占比分母永远是**用户当前扫描的目标**（盘符或文件夹），不是整盘容量。文案不得写"占磁盘%"。
+- **图表长名防溢出（v1.0.3）**：三张图均做实测收敛——条形图 y 轴标签中间省略 + 实测宽度动态左边距；环形图图例省略到 16 字并左移防出界；树图标签按 `ax.transData` 实测矩形像素宽逐步收缩。勿改回固定截断或估算公式（实测过会溢出/丢扩展名）。
 - **版本**：每次修改 SKILL.md，`version` +1 并重新备份。

@@ -42,7 +42,7 @@ _SERVER_PORT = 8780
 
 # 版本号：与 SKILL.md / meta.json 保持一致。
 # 页面 <title> 与顶部 <h1> 统一取此处（模板占位符 __VERSION__），避免多处硬编码漂移。
-VERSION = "1.0.5"
+VERSION = "1.0.7"
 
 # ---------------------------------------------------------------------------
 # 扫描历史（本地快照，用于计算「较上次扫描的体积变化 / 增长预警」）
@@ -111,6 +111,23 @@ def _load_last():
 # ---------------------------------------------------------------------------
 # 扫描数据 → 响应 JSON
 # ---------------------------------------------------------------------------
+
+def drives_usage():
+    """各盘符当前使用情况：[{drive,letter,total,used,free,pct}]——用于首页盘符概览卡片。
+    容量取 GetDiskFreeSpaceExW；读取失败（如空光驱/网络盘）时 total/free/pct 为 None。"""
+    out = []
+    for d in da.list_fixed_drives():
+        try:
+            letter = d.rstrip("\\").rstrip(":").upper()
+        except Exception:
+            letter = d[:1].upper()
+        total, free = da.disk_capacity(d)
+        used = (total - free) if (total is not None and free is not None) else None
+        pct = round(used / total * 100, 1) if (total and used is not None) else None
+        out.append({"drive": d, "letter": letter, "total": total,
+                    "free": free, "used": used, "pct": pct})
+    return out
+
 
 def build_response(disk=None, path=None, depth=2, top=15, progress=None, record=True):
     if disk:
@@ -417,6 +434,42 @@ select,input,button{font-family:inherit}
 .stat.pct{border-left-color:#d9534f}
 .stat.pct .v{color:#e87370}
 .stat .v.warn{color:var(--acc2)}
+/* 各盘符当前使用情况（置顶概览卡）：点击卡片切换盘符；颜色按使用率分级预警 */
+.drvlist{display:flex;flex-wrap:wrap;gap:10px}
+/* 标题处分级图例：四个状态词前各一枚圆形色块，一眼看出颜色与等级的对应 */
+.drvlegend{display:inline-flex;flex-wrap:wrap;align-items:center;gap:12px;margin-left:4px;vertical-align:middle}
+.drvlg{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:400;color:var(--sub);white-space:nowrap}
+.drvlg i{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.drvlg.ok i{background:#3fb27f}
+.drvlg.mid i{background:#e0a13a}
+.drvlg.high i{background:#ef7b3a}
+.drvlg.crit i{background:#d9534f}
+.drvlist .dempty{color:var(--sub);font-size:12.5px;padding:4px 2px}
+.drvitem{flex:1 1 190px;min-width:170px;background:var(--ink);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;padding:9px 12px;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s}
+.drvitem:hover{box-shadow:0 0 0 1px #3c5a74,0 6px 16px rgba(0,0,0,.3);transform:translateY(-1px)}
+.drvitem .dh{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.drvitem .dn{font-size:13.5px;font-weight:700;color:var(--tx);white-space:nowrap}
+.drvitem .dcur{display:none;margin-left:6px;font-size:10px;font-weight:600;color:var(--acc);border:1px solid #2f5b47;background:#15291f;border-radius:5px;padding:0 4px;vertical-align:1px}
+.drvitem.on .dcur{display:inline-block}
+.drvitem .dp{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--tx)}
+.drvitem .dbar{height:6px;border-radius:4px;background:#1d2a37;margin-top:8px;overflow:hidden}
+.drvitem .dfill{height:100%;border-radius:4px;transition:width .4s}
+.drvitem .dsub{font-size:11px;color:var(--sub);margin-top:7px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drvitem.ok{border-left-color:#3fb27f}
+.drvitem.ok .dp{color:#5dc99a}
+.drvitem.ok .dfill{background:#3fb27f}
+.drvitem.mid{border-left-color:#e0a13a}
+.drvitem.mid .dp{color:#f0bc5b}
+.drvitem.mid .dfill{background:#e0a13a}
+.drvitem.high{border-left-color:#ef7b3a}
+.drvitem.high .dp{color:#f79a63}
+.drvitem.high .dfill{background:#ef7b3a}
+.drvitem.crit{border-left-color:#d9534f}
+.drvitem.crit .dp{color:#e87370}
+.drvitem.crit .dfill{background:#d9534f}
+.drvitem.unknown{border-left-color:#3d4d5c;opacity:.72}
+.drvitem.unknown .dp{color:var(--sub)}
+.drvitem.on{box-shadow:0 0 0 1px #3fb27f,0 6px 18px rgba(0,0,0,.35)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px}
 .ct{font-size:14px;color:var(--tx);font-weight:600;margin-bottom:9px}
 .ct .hint{color:var(--sub);font-weight:400;font-size:12px}
@@ -561,6 +614,8 @@ tbody tr.row-fast{background:rgba(224,114,26,.10)}
   .stat{min-width:0;flex:1 1 calc(50% - 6px);padding:7px 9px}
   .stat .v{font-size:14px}
   .stat .k{font-size:10px}
+  .drvitem{flex:1 1 calc(50% - 5px);min-width:0;padding:8px 10px}
+  .drvitem .dsub{font-size:10px}
   th,td{padding:7px 8px;font-size:12px}
   .btn{padding:6px 11px;font-size:12px}
   .actbtn{padding:2px 7px;font-size:12px}
@@ -583,6 +638,11 @@ tbody tr.row-fast{background:rgba(224,114,26,.10)}
     <div class="dmsg">磁盘分析需要本地服务在运行。服务已停止或被关闭时，页面仍可打开但「开始」无法扫描。请在本机终端重新启动服务（重启后刷新本页即可）：</div>
     <code id="cmdLine">__START_CMD__</code>
     <button class="btn" id="copyCmd">📋 复制启动命令</button>
+  </div>
+
+  <div class="card drvcard">
+    <div class="ct">💽 各盘符当前使用情况 <span class="hint">· 点击卡片切换盘符 · 使用率分级预警：</span><span class="drvlegend"><span class="drvlg ok"><i></i>充足</span><span class="drvlg mid"><i></i>偏高</span><span class="drvlg high"><i></i>紧张</span><span class="drvlg crit"><i></i>告急</span></span></div>
+    <div id="drvlist" class="drvlist"><div class="dempty">读取中…</div></div>
   </div>
 
   <div class="toolbar">
@@ -748,6 +808,54 @@ function refreshDrives(drives){
   ddRender('driveSel');
 }
 
+/* ===== 各盘符当前使用情况（置顶概览卡）：点击卡片即切换盘符 ===== */
+var DRV_CACHE=[];
+function driveLevel(pct){
+  // 使用率分级预警：充足(<70%) / 偏高(70~85%) / 紧张(85~95%) / 告急(≥95%)，颜色见 .drvitem.* CSS
+  if(pct==null) return {cls:'unknown',txt:'未知'};
+  if(pct>=95) return {cls:'crit',txt:'告急'};
+  if(pct>=85) return {cls:'high',txt:'紧张'};
+  if(pct>=70) return {cls:'mid',txt:'偏高'};
+  return {cls:'ok',txt:'充足'};
+}
+function renderDrives(list){
+  var box=$('drvlist'); if(!box) return;
+  if(!list||!list.length){ box.innerHTML='<div class="dempty">未读取到盘符</div>'; return; }
+  var cur=$('driveSel').value;
+  box.innerHTML=list.map(function(d){
+    var lv=driveLevel(d.pct), on=(d.drive===cur)?' on':'';
+    var pctTxt=(d.pct==null)?'—':d.pct.toFixed(1)+'%';
+    var bar=(d.pct==null)?'':
+      '<div class="dbar"><div class="dfill" style="width:'+Math.min(100,Math.max(0,d.pct))+'%"></div></div>';
+    var sub=(d.total==null)?'容量不可用':(human(d.used)+' 已用 / '+human(d.total)+' 总');
+    return '<div class="drvitem '+lv.cls+on+'" data-drive="'+esc(d.drive)+'" title="点击切换到 '+esc(d.drive)+'">'
+      +'<div class="dh"><span class="dn">💽 '+esc(d.letter)+':<span class="dcur">当前</span></span>'
+      +'<span class="dp">'+pctTxt+'</span></div>'+bar
+      +'<div class="dsub">'+sub+' · '+lv.txt+'</div></div>';
+  }).join('');
+}
+function loadDrivesUsage(){
+  fetch('/drives',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})
+    .then(function(j){
+      if(!j||!j.drives) return;
+      DRV_CACHE=j.drives;
+      refreshDrives(j.drives.map(function(x){return x.drive;}));
+      renderDrives(DRV_CACHE);
+    }).catch(function(){});
+}
+$('drvlist').addEventListener('click', function(e){
+  var it=e.target.closest('.drvitem'); if(!it||!it.dataset.drive) return;
+  var d=it.dataset.drive, sel=$('driveSel');
+  var has=[].slice.call(sel.options).some(function(o){return o.value===d;});
+  if(!has){ toast('该盘符当前不可选'); return; }
+  if(sel.value!==d){
+    sel.value=d;
+    sel.dispatchEvent(new Event('change',{bubbles:true}));  // 复用「切盘符清空路径」逻辑
+    ddRender('driveSel');
+  }
+  renderDrives(DRV_CACHE);  // 刷新选中态
+});
+
 function startScan(){
   normalizePathInput();
   var drive=$('driveSel').value;
@@ -841,6 +949,7 @@ function render(d){
   $('charts').classList.add('show');
   $('tablewrap').classList.add('show');
   refreshDrives(d.drives);
+  loadDrivesUsage();   // 扫描完成后刷新各盘符使用率（占用会变）
   var st=$('stats');
   if(d.capacity){var c=d.capacity;
     var pctcls=(c.pct!=null&&c.pct>=90)?'warn':'';
@@ -1194,6 +1303,7 @@ buildDrives();
 mountDD('driveSel','ddWrap','ddBtn','ddLabel','ddList');
 mountDD('mDrive','mDD','mDDBtn','mDDLabel','mDDList');
 applyLast();
+loadDrivesUsage();   // 置顶「各盘符当前使用情况」概览卡
 // 打开页面即还原「上次扫描完整快照」（图表+明细+报告），无需重新扫描
 fetch('/last',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})
   .then(function(d){ if(d && d.nodes && d.nodes.length){ render(d); setConn(true); } })
@@ -1245,6 +1355,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, body, "application/json; charset=utf-8")
             except Exception:
                 self._send(204, b"")
+        elif u.path == "/drives":
+            self._send(200, json.dumps({"drives": drives_usage()},
+                                       ensure_ascii=False))
         elif u.path == "/scan":
             self.handle_scan(qs)
         elif u.path == "/cancel":

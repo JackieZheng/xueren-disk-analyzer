@@ -1,0 +1,15 @@
+{
+  "id": "xueren-disk-analyzer",
+  "name": "雪人老师·磁盘空间分析器",
+  "version": "1.2.21",
+  "author": "雪人",
+  "platforms": [
+    "ima",
+    "WorkBuddy",
+    "QClaw"
+  ],
+  "description": "交互式磁盘空间分析工具（可选 C/D/E/F 或任意目录），命令行静态报告 + 网页交互版（盘符下拉、目录选择、实时进度卡片、可停止、点击目录打开所在位置、长路径中间省略号、明细表占比口径准确、🛡️系统/👁️隐藏双属性标签可共存、盘符使用率分级配色预警、近期消耗速度预警）。纯 Python，依赖 matplotlib + squarify，零 CDN 离线自包含。当用户说\"分析 C 盘\"\"磁盘空间分析\"\"哪个目录占空间\"\"E 盘空间分析\"\"做个磁盘分析工具\"等意图时触发。",
+  "github": "https://github.com/JackieZheng/xueren-disk-analyzer",
+  "agent_created": true,
+  "updated_at": "2026-10-13"
+}
